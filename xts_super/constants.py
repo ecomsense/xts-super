@@ -1,4 +1,5 @@
 from traceback import print_exc
+from pprint import pprint
 
 try:
     from toolkit.logger import Logger
@@ -81,8 +82,9 @@ print(O_CNFG, O_SETG)
 
 
 def set_logger():
-    level = O_SETG.get("log_level", 10)
-    if O_SETG.get("show_log", False):
+    S_LOG = O_SETG["log"]
+    level = S_LOG.pop("level", 10)
+    if S_LOG.get("show", False):
         return Logger(level)
     return Logger(level, S_LOG)
 
@@ -92,12 +94,9 @@ logging = set_logger()
 
 CMMN = O_SETG["common"]
 SYMBOL = CMMN["base"]
+BASE = O_SETG[SYMBOL]
+SUPR = O_SETG["supertrend"]
 
-# expiry
-EXPIRY = O_SETG["expiry"]
 
 # distance
-DIST = O_SETG["distance"]
-
-
-S_DATA = S_DATA + SYMBOL + "/"
+pprint(O_SETG)

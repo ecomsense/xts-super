@@ -1,20 +1,12 @@
 from constants import S_DATA, O_FUTL
 import re
 from typing import Dict, Union
+from io import StringIO
 import pandas as pd
 
 exch = {
     "NSE": {"id": 1, "code": "NSECM"},
     "NFO": {"id": 2, "code": "NSEFO"},
-}
-msg_code = {
-    "instrument_change": 1105,
-    "touchline": 1501,
-    "market_data": 1502,
-    "candle_data": 1505,
-    "market_status": 1507,
-    "oi": 1510,
-    "ltp": 1512,
 }
 dct_sym = {
     "NIFTY": {
@@ -33,40 +25,60 @@ dct_sym = {
     },
 }
 
+msg_code = {
+    "instrument_change": 1105,
+    "touchline": 1501,
+    "market_data": 1502,
+    "candle_data": 1505,
+    "market_status": 1507,
+    "oi": 1510,
+    "ltp": 1512,
+}
+"""
+ExchangeSegment|ExchangeInstrumentID|InstrumentType|Name|Description|Series|
+NameWithSeries|InstrumentID|PriceBand.High|PriceBand.Low|
+FreezeQty|TickSize|LotSize|Multiplier|DisplayName|ISIN|PriceNumerator|PriceDenominator|DetailedDescription
+"""
+
 
 class Symbols:
     def __init__(self, exchange: str, symbol: str, expiry: str):
         self.exchange = exchange
         self.symbol = symbol
         self.expiry = expiry
-        self.dumpfile = f"{S_DATA}{self.exchange}_symbols.txt"
+        self.dumpfile = f"{S_DATA}{self.exchange}_symbols.csv"
 
     def dump(self, data: Union[str, str]) -> None:
         if O_FUTL.is_file_not_2day(self.dumpfile):
-            header = "ExchangeSegment | ExchangeInstrumentID | InstrumentType | Name | Description | Series | NameWithSeries | InstrumentID | PriceBand.High | PriceBand.Low | FreezeQty | TickSize | LotSize | Multiplier | UnderlyingInstrumentId | UnderlyingIndexName | ContractExpiration | StrikePrice | OptionType | displayName | PriceNumerator | PriceDenominator"
-            header += "\n"
-            with open(self.dumpfile, "w") as file:
-                file.write(header)
-                file.write(data)
-
-    def find_symbol_from_token(self, inst_id: int) -> str:
-        def is_int(string):
-            try:
-                int(string)
-                return True
-            except ValueError:
-                return False
-
-        with open(self.dumpfile, "r") as file:
-            contents = file.read()
-            records = contents.split("\n")
-            print(f"searching in {len(records)} records for {inst_id}")
-            for record in records:
-                fields = record.split("|")
-                if is_int(fields[1]) and int(fields[1]) == inst_id:
-                    inst = fields[4]
-                    return inst
-        return "INSTRUMENT_NOT_FOUND"
+            df = pd.read_csv(
+                StringIO(data["result"]),
+                sep="|",
+                usecols=range(19),
+                header=None,
+                low_memory=False,
+            )
+            df.columns = [
+                "ExchangeSegment",
+                "ExchangeInstrumentID",
+                "InstrumentType",
+                "Name",
+                "Description",
+                "Series",
+                "NameWithSeries",
+                "InstrumentID",
+                "PriceBand.High",
+                "PriceBand.Low",
+                "FreezeQty",
+                "TickSize",
+                "LotSize",
+                "Multiplier",
+                "UnderlyingInstrumentId",
+                "UnderlyingIndexName",
+                "ContractExpiration",
+                "StrikePrice",
+                "OptionType",
+            ]
+            df.to_csv(self.dumpfile, index=False, encoding="utf-8")
 
     def find_token_from_symbol(self, inst: str) -> int:
         with open(self.dumpfile, "r") as file:
@@ -92,14 +104,14 @@ class Symbols:
         return lst_dct_inst
 
     def find_option_by_distance(
-        self, atm: int, distance: int, c_or_p: str, dct_symbols: dict
+        self, atm: int, distance: int, c_or_p: str, dct_symbols: Dict
     ):
         match = {}
-        if c_or_p == "C":
+        if c_or_p == "CE":
             find_strike = atm + (distance * dct_sym[self.symbol]["diff"])
         else:
             find_strike = atm - (distance * dct_sym[self.symbol]["diff"])
-        option_pattern = self.symbol + self.expiry + c_or_p + str(find_strike)
+        option_pattern = self.symbol + self.expiry + str(find_strike) + c_or_p
         for k, v in dct_symbols.items():
             if v == option_pattern:
                 match.update({"symbol": v, "token": k.split("|")[-1]})
@@ -109,16 +121,60 @@ class Symbols:
         else:
             raise Exception("Option not found")
 
-    """
-    not used
-    """
+    def build_option_chain(self, strike) -> Dict:
+        # TODO
+        df = pd.read_csv(self.dumpfile, low_memory=False)
+        lst = []
+        lst.append(self.symbol + self.expiry + str(strike) + "CE")
+        lst.append(self.symbol + self.expiry + str(strike) + "PE")
+        for v in range(1, dct_sym[self.symbol]["depth"]):
+            lst.append(
+                self.symbol
+                + self.expiry
+                + str(strike + v * dct_sym[self.symbol]["diff"])
+                + "CE"
+            )
+            lst.append(
+                self.symbol
+                + self.expiry
+                + str(strike + v * dct_sym[self.symbol]["diff"])
+                + "PE"
+            )
+            lst.append(
+                self.symbol
+                + self.expiry
+                + str(strike - v * dct_sym[self.symbol]["diff"])
+                + "CE"
+            )
+            lst.append(
+                self.symbol
+                + self.expiry
+                + str(strike - v * dct_sym[self.symbol]["diff"])
+                + "PE"
+            )
 
-    def get_atm(self, ltp) -> int:
+        # df["Exchange"] = self.exchange
+        tokens_found = (
+            df[df["Description"].isin(lst)]
+            .assign(
+                tknexc=self.exchange + "|" + df["ExchangeInstrumentID"].astype(str)
+            )[["tknexc", "Description"]]
+            .set_index("Description")
+        )
+
+        dct = tokens_found.to_dict()["tknexc"]
+        return dct
+
+    def calc_atm_from_ltp(self, ltp) -> int:
         current_strike = ltp - (ltp % dct_sym[self.symbol]["diff"])
         next_higher_strike = current_strike + dct_sym[self.symbol]["diff"]
         if ltp - current_strike < next_higher_strike - ltp:
             return int(current_strike)
         return int(next_higher_strike)
+
+    """
+    not used
+    """
 
     def parse_option_type(self, tradingsymbol):
         option_pattern = re.compile(rf"{self.symbol}{self.expiry}([CP])\d+")
@@ -128,47 +184,24 @@ class Symbols:
         else:
             return False
 
-    def build_option_chain(self, strike):
-        df = pd.read_csv(self.dumpfile)
-        lst = []
-        lst.append(self.symbol + self.expiry + "C" + str(strike))
-        lst.append(self.symbol + self.expiry + "P" + str(strike))
-        for v in range(1, dct_sym[self.symbol]["depth"]):
-            lst.append(
-                self.symbol
-                + self.expiry
-                + "C"
-                + str(strike + v * dct_sym[self.symbol]["diff"])
-            )
-            lst.append(
-                self.symbol
-                + self.expiry
-                + "P"
-                + str(strike + v * dct_sym[self.symbol]["diff"])
-            )
-            lst.append(
-                self.symbol
-                + self.expiry
-                + "C"
-                + str(strike - v * dct_sym[self.symbol]["diff"])
-            )
-            lst.append(
-                self.symbol
-                + self.expiry
-                + "P"
-                + str(strike - v * dct_sym[self.symbol]["diff"])
-            )
+    def find_symbol_from_token(self, inst_id: int) -> str:
+        def is_int(string):
+            try:
+                int(string)
+                return True
+            except ValueError:
+                return False
 
-        df["Exchange"] = self.exchange
-        tokens_found = (
-            df[df["TradingSymbol"].isin(lst)]
-            .assign(tknexc=df["Exchange"] + "|" + df["Token"].astype(str))[
-                ["tknexc", "TradingSymbol"]
-            ]
-            .set_index("tknexc")
-        )
-        dct = tokens_found.to_dict()
-        return dct["TradingSymbol"]
+        with open(self.dumpfile, "r") as file:
+            contents = file.read()
+            records = contents.split("\n")
+            print(f"searching in {len(records)} records for {inst_id}")
+            for record in records:
+                fields = record.split("|")
+                if is_int(fields[1]) and int(fields[1]) == inst_id:
+                    inst = fields[4]
+                    return inst
+        return "INSTRUMENT_NOT_FOUND"
 
 
 if __name__ == "__main__":
