@@ -9,7 +9,8 @@ import pandas as pd
 import numpy as np
 from traceback import print_exc
 import json
-from typing import Dict, List
+from typing import Dict
+from pprint import pprint
 
 F_HIST = f"{S_DATA}{SYMBOL}/history.csv"
 
@@ -31,64 +32,74 @@ MAGIC = 15
 
 
 def get_ltp():
-    blink()
-    args = [
-        {
-            "exchangeSegment": exch["NSE"]["id"],
-            "exchangeInstrumentID": dct_sym[SYMBOL]["token"],
-        }
-    ]
-    resp = Helper.api.broker.get_quote(args, msg_code["ltp"], "JSON")
-    ltp = json.loads(resp["result"]["listQuotes"][0])["LastTradedPrice"]
-    print(f"{ltp=}")
-    ltp = 55000
-    return ltp
+    try:
+        ltp = 50000
+        timer(5)
+        args = [
+            {
+                "exchangeSegment": exch["NSE"]["id"],
+                "exchangeInstrumentID": dct_sym[SYMBOL]["token"],
+            }
+        ]
+        print(args)
+        resp = Helper.mapi.broker.get_quote(args, msg_code["ltp"], "JSON")
+        print(f"get_ltp {resp}")
+        str_resp = resp["result"]["listQuotes"][0]
+        print(f"{str_resp}")
+        jsn_resp = json.loads(str_resp)
+        print(f"{jsn_resp}")
+        ltp = jsn_resp["LastTradedPrice"]
+    except Exception as e:
+        logging.error(f"get_ltp: {e}")
+        print_exc()
+    finally:
+        return ltp
 
 
-Helper.set_api()
-Helper.set_mapi()
+try:
+    Helper.set_api()
+    Helper.set_mapi()
 
-# symbol objects
-B_SYM = Symbols(EXCHANGE, SYMBOL, B_EXPIRY)
-resp = Helper.api.broker.get_master([exch[EXCHANGE]["code"]])
-if resp:
-    B_SYM.dump(resp)
+    # symbol objects
+    B_SYM = Symbols(EXCHANGE, SYMBOL, B_EXPIRY)
+    resp = Helper.api.broker.get_master([exch[EXCHANGE]["code"]])
+    if resp:
+        B_SYM.dump(resp)
 
-Helper.ltp = get_ltp()
-atm = B_SYM.calc_atm_from_ltp(Helper.ltp)
-b_tknsym: Dict = B_SYM.build_option_chain(atm)
+    Helper.ltp = get_ltp()
+    atm = B_SYM.calc_atm_from_ltp(Helper.ltp)
+    b_tknsym: Dict = B_SYM.build_option_chain(atm)
 
-S_SYM = Symbols(EXCHANGE, SYMBOL, S_EXPIRY)
-s_tknsym: Dict = S_SYM.build_option_chain(atm)
+    S_SYM = Symbols(EXCHANGE, SYMBOL, S_EXPIRY)
+    s_tknsym: Dict = S_SYM.build_option_chain(atm)
+except Exception as e:
+    logging.error("bootstrap: ", e)
+    print_exc()
 
 
 def find_symbol(buy_or_short: str, order_args: Dict):
-    diff = B_DIFF if order_args["side"] == "B" else S_DIFF
-    if buy_or_short == "buy":
-        atm = B_SYM.calc_atm_from_ltp(Helper.ltp)
-        option = B_SYM.find_option_by_distance(
-            atm,
-            diff,
-            "CE",
-        )
-    else:
-        atm = S_SYM.calc_atm_from_ltp(Helper.ltp)
-        option = S_SYM.find_option_by_distance(
-            atm,
-            diff,
-            "PE",
-        )
-        segment = exch[S_SYM.exchange]["id"]
-        key = S_SYM.exchange + "|" + option
-    order_args["symbol"] = segment + ":" + s_tknsym[key]
-    print(order_args)
-    return order_args
+    try:
+        diff = B_DIFF if order_args["side"] == "B" else S_DIFF
+        if buy_or_short == "buy":
+            atm = B_SYM.calc_atm_from_ltp(Helper.ltp)
+            option = B_SYM.find_option_by_distance(atm, diff, "CE", b_tknsym)
+            segment = exch[B_SYM.exchange]["id"]
+            key = S_SYM.exchange + "|" + option["token"]
+        else:
+            atm = S_SYM.calc_atm_from_ltp(Helper.ltp)
+            option = S_SYM.find_option_by_distance(atm, diff, "PE", s_tknsym)
+            segment = exch[S_SYM.exchange]["id"]
+            key = S_SYM.exchange + "|" + option["token"]
+        order_args["symbol"] = str(segment) + ":" + s_tknsym[key]
+        return order_args
+    except Exception as e:
+        logging.error("find_symbol: ", e)
+        print_exc()
 
 
 def split_colors(st: pd.DataFrame):
     global G_MODE_TRADE
     try:
-        new_pos = {}
         UP = []
         DN = []
         for i in range(len(st)):
@@ -155,7 +166,7 @@ def split_colors(st: pd.DataFrame):
     except Exception as e:
         logging.warning(f"{e} while splitting colors")
         print_exc()
-    return st, new_pos
+    return st
 
 
 def main():
@@ -171,17 +182,17 @@ def main():
         # init super trend streaming indicator
         ST = si.SuperTrend(SUPR["atr"], SUPR["multiplier"])
     except Exception as e:
-        print("main:", e)
+        logging.error("main:", e)
+        print_exc()
 
     def run(ival=None):
         try:
-            df_normal = pd.DataFrame()
             if not ival:
                 ival = len(df_ticks)
 
             Helper.ltp = get_ltp()
             if Helper.ltp == 0:
-                return df_normal
+                return pd.DataFrame()
 
             df_ticks.loc[len(df_ticks)] = {
                 "timestamp": dt.now().timestamp(),
@@ -200,28 +211,29 @@ def main():
                 df_normal.loc[key, "st_dir"] = st_dir
 
             # get direction and split colors of supertrend
-            df_normal, new_pos = split_colors(df_normal)
+            df_normal = split_colors(df_normal)
+            """
             # df_normal.to_csv(DATA + "df_normal.csv")
             # update positions if they are available
             if any(new_pos):
                 logging.debug(f"found {new_pos=}")
-                # D_POS.update(new_pos)
-            timer(5)
-
+                D_POS.update(new_pos)
+            """
+            timer(1)
+            pprint(Helper.paper)
+            return df_normal
         except KeyboardInterrupt:
             __import__("sys").exit(0)
 
         except Exception as e:
             logging.error(f"{e} while common func")
-            print(e)
-        finally:
-            return df_normal
+            print_exc()
 
     while is_time_past(CMMN["start"]):
-        timer(2)
-        print("starting ..")
+        timer(1)
         _ = run()
     else:
+        # TODO remove this after testing
         run()
 
 

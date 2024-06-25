@@ -1,16 +1,24 @@
 from stock_brokers.xts.xts import Xts
-from constants import O_CNFG
+from constants import O_CNFG, CMMN
 from typing import List
+from traceback import print_exc
 
 
 def login(api_name):
-    cred = O_CNFG[api_name]
-    api = Xts(**cred)
-    if api_name == "xts_interactive":
-        api.broker.interactive_login()
-    elif api_name == "xts_marketdata":
-        api.broker.marketdata_login()
-    return api
+    try:
+        cred = O_CNFG[api_name]
+        if api_name == "xts_interactive":
+            api = Xts(**cred)
+            api.broker.interactive_login()
+            return api
+        elif api_name == "xts_marketdata":
+            mapi = Xts(**cred)
+            mapi.broker.marketdata_login()
+            return mapi
+    except Exception as e:
+        print(e)
+        print_exc()
+        __import__("sys").exit(1)
 
 
 class Helper:
@@ -18,6 +26,7 @@ class Helper:
     mapi = None
     buy = []
     short = []
+    paper = []
 
     @classmethod
     def set_api(cls):
@@ -37,7 +46,11 @@ class Helper:
                 side = i.pop("side")
                 i["side"] = "S" if side == "B" else "B"
                 i["tag"] = "exit"
-                cls.api.order_place(**i)
+                if CMMN["live"]:
+                    cls.api.order_place(**i)
+                else:
+                    cls.paper.append(i)
+
             lst = []
 
     @classmethod
@@ -51,5 +64,8 @@ class Helper:
         for o in orders:
             o["validity"] = "DAY"
             o["product"] = "MIS"
-            cls.api.order_place(**o)
+            if CMMN["live"]:
+                cls.api.order_place(**o)
+            else:
+                cls.paper.append(o)
             lst.append(o)
