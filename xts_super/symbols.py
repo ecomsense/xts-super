@@ -13,14 +13,14 @@ dct_sym = {
         "diff": 50,
         "index": "NIFTY 50",
         "exch": "NSE",
-        "token": "26000",
+        "token": 26000,
         "depth": 16,
     },
     "BANKNIFTY": {
         "diff": 100,
         "index": "NIFTY BANK",
         "exch": "NSE",
-        "token": "26001",
+        "token": 26001,
         "depth": 25,
     },
 }

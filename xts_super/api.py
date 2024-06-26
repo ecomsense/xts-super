@@ -1,22 +1,27 @@
+from constants import logging, O_CNFG, CMMN
 from stock_brokers.xts.xts import Xts
-from constants import O_CNFG, CMMN
 from typing import List
 from traceback import print_exc
+import json
+from toolkit.kokoo import timer
 
 
 def login(api_name):
     try:
         cred = O_CNFG[api_name]
+        api = Xts(**cred)
         if api_name == "xts_interactive":
-            api = Xts(**cred)
             api.broker.interactive_login()
-            return api
         elif api_name == "xts_marketdata":
-            mapi = Xts(**cred)
-            mapi.broker.marketdata_login()
-            return mapi
+            api.broker.marketdata_login()
+        logging.debug(f"logging in {api_name}")
+        logging.debug(cred)
+        """
+        logging.info(api.broker.get_profile(clientID=cred["userID"]))
+        """
+        return api
     except Exception as e:
-        print(e)
+        logging.error(e)
         print_exc()
         __import__("sys").exit(1)
 
@@ -62,6 +67,7 @@ class Helper:
         """
         lst = cls.buy if buy_or_short == "buy" else cls.short
         for o in orders:
+            logging.info(o)
             o["validity"] = "DAY"
             o["product"] = "MIS"
             if CMMN["live"]:
@@ -69,3 +75,23 @@ class Helper:
             else:
                 cls.paper.append(o)
             lst.append(o)
+
+    @classmethod
+    def get_ltp(cls, args, xtsMessageCode, publishFormat="JSON"):
+        try:
+            resp = cls.mapi.broker.get_quote(args, xtsMessageCode, publishFormat)
+            if resp is not None:
+                logging.debug(f"get_underlying {resp=}")
+                str_resp = resp["result"]["listQuotes"][0]
+                logging.debug(f"{str_resp=}")
+                jsn_resp = json.loads(str_resp)
+                logging.debug(f"{jsn_resp=}")
+                ltp = jsn_resp["LastTradedPrice"]
+                return ltp
+            else:
+                cls.mapi = None
+                cls.set_mapi()
+                cls.get_ltp(args, xtsMessageCode)
+        except Exception as e:
+            logging.error(f"ltp: {e}")
+            print_exc()

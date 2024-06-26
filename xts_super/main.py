@@ -1,5 +1,5 @@
-from constants import logging, CMMN, SYMBOL, S_DATA, SUPR, BASE
-from toolkit.kokoo import is_time_past, blink, timer
+from constants import O_FUTL, logging, CMMN, SYMBOL, S_DATA, SUPR, BASE
+from toolkit.kokoo import is_time_past, timer
 from api import Helper
 from symbols import Symbols, exch, msg_code, dct_sym
 from renkodf import RenkoWS
@@ -8,7 +8,6 @@ from datetime import datetime as dt
 import pandas as pd
 import numpy as np
 from traceback import print_exc
-import json
 from typing import Dict
 from pprint import pprint
 
@@ -31,7 +30,7 @@ G_MODE_TRADE = False
 MAGIC = 15
 
 
-def get_ltp():
+def get_underlying():
     try:
         ltp = 50000
         timer(5)
@@ -41,16 +40,10 @@ def get_ltp():
                 "exchangeInstrumentID": dct_sym[SYMBOL]["token"],
             }
         ]
-        print(args)
-        resp = Helper.mapi.broker.get_quote(args, msg_code["ltp"], "JSON")
-        print(f"get_ltp {resp}")
-        str_resp = resp["result"]["listQuotes"][0]
-        print(f"{str_resp}")
-        jsn_resp = json.loads(str_resp)
-        print(f"{jsn_resp}")
-        ltp = jsn_resp["LastTradedPrice"]
+        logging.debug(f"{args=}")
+        ltp = Helper.get_ltp(args, msg_code["ltp"])
     except Exception as e:
-        logging.error(f"get_ltp: {e}")
+        logging.error(f"get_underlying: {e}")
         print_exc()
     finally:
         return ltp
@@ -66,7 +59,7 @@ try:
     if resp:
         B_SYM.dump(resp)
 
-    Helper.ltp = get_ltp()
+    Helper.ltp = get_underlying()
     atm = B_SYM.calc_atm_from_ltp(Helper.ltp)
     b_tknsym: Dict = B_SYM.build_option_chain(atm)
 
@@ -91,6 +84,7 @@ def find_symbol(buy_or_short: str, order_args: Dict):
             segment = exch[S_SYM.exchange]["id"]
             key = S_SYM.exchange + "|" + option["token"]
         order_args["symbol"] = str(segment) + ":" + s_tknsym[key]
+        logging.debug(f"{order_args=}")
         return order_args
     except Exception as e:
         logging.error("find_symbol: ", e)
@@ -190,7 +184,7 @@ def main():
             if not ival:
                 ival = len(df_ticks)
 
-            Helper.ltp = get_ltp()
+            Helper.ltp = get_underlying()
             if Helper.ltp == 0:
                 return pd.DataFrame()
 
@@ -221,6 +215,7 @@ def main():
             """
             timer(1)
             pprint(Helper.paper)
+            O_FUTL.write_file(S_DATA + "papper.json", Helper.paper)
             return df_normal
         except KeyboardInterrupt:
             __import__("sys").exit(0)
