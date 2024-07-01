@@ -84,7 +84,7 @@ def find_symbol(buy_or_short: str, order_args: Dict):
             segment = exch[S_SYM.exchange]["id"]
             key = S_SYM.exchange + "|" + option["token"]
         order_args["symbol"] = str(segment) + ":" + s_tknsym[key]
-        logging.debug(f"{order_args=}")
+        logging.info(f"{order_args=}")
         return order_args
     except Exception as e:
         logging.error("find_symbol: ", e)

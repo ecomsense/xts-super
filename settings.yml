@@ -11,7 +11,7 @@ supertrend:
   atr: 1
   multiplier: 2.1
 BANKNIFTY:
-  bexpiry: 24JUN
+  bexpiry: 24AUG
   sexpiry: 24JUL
   bdiff: -1
   sdiff: -1

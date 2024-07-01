@@ -23,7 +23,6 @@ def login(api_name):
     except Exception as e:
         logging.error(e)
         print_exc()
-        __import__("sys").exit(1)
 
 
 class Helper:
@@ -87,6 +86,7 @@ class Helper:
                 jsn_resp = json.loads(str_resp)
                 logging.debug(f"{jsn_resp=}")
                 ltp = jsn_resp["LastTradedPrice"]
+                logging.info(f"{ltp=}")
                 return ltp
             else:
                 cls.mapi = None
