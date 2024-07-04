@@ -1,20 +1,28 @@
 log:
   show: 1
-  level: 10
+  level: 20
 common:
-  start: "9:30"
+  start: "0:30"
   eod: "15:25"
-  live: 0
+  live: 1
   base: BANKNIFTY
   exchange: NFO
 supertrend:
   atr: 1
-  multiplier: 2.1
+  multiplier: 1.8
 BANKNIFTY:
-  bexpiry: 24AUG
-  sexpiry: 24JUL
-  bdiff: -1
-  sdiff: -1
+  bexpiry: 24710
+  sexpiry: 24710
+  bdiff: 6
+  sdiff: 0
   quantity: 15
-  brick: 49
+  brick: 78.6
   nse: "NIFTY BANK"
+NIFTY:
+  bexpiry: 24711
+  sexpiry: 24711
+  bdiff: 6
+  sdiff: 0
+  quantity: 45
+  brick: 21
+  nse: "NIFTY 50"

@@ -1,15 +1,14 @@
-from constants import O_FUTL, logging, CMMN, SYMBOL, S_DATA, SUPR, BASE
+from constants import logging, CMMN, SYMBOL, S_DATA, SUPR, BASE
 from toolkit.kokoo import is_time_past, timer
 from api import Helper
-from symbols import Symbols, exch, msg_code, dct_sym
+from symbols import Symbols, exch, dct_sym
 from renkodf import RenkoWS
 import streaming_indicators as si
 from datetime import datetime as dt
 import pandas as pd
 import numpy as np
 from traceback import print_exc
-from typing import Dict
-from pprint import pprint
+from typing import Dict, Any
 
 F_HIST = f"{S_DATA}{SYMBOL}/history.csv"
 
@@ -32,8 +31,7 @@ MAGIC = 15
 
 def get_underlying():
     try:
-        ltp = 50000
-        timer(5)
+        ltp = None
         args = [
             {
                 "exchangeSegment": exch["NSE"]["id"],
@@ -41,12 +39,11 @@ def get_underlying():
             }
         ]
         logging.debug(f"{args=}")
-        ltp = Helper.get_ltp(args, msg_code["ltp"])
+        ltp = Helper.get_ltp(args)
+        return ltp
     except Exception as e:
         logging.error(f"get_underlying: {e}")
         print_exc()
-    finally:
-        return ltp
 
 
 try:
@@ -55,35 +52,40 @@ try:
 
     # symbol objects
     B_SYM = Symbols(EXCHANGE, SYMBOL, B_EXPIRY)
+    S_SYM = Symbols(EXCHANGE, SYMBOL, S_EXPIRY)
+
     resp = Helper.api.broker.get_master([exch[EXCHANGE]["code"]])
     if resp:
         B_SYM.dump(resp)
-
     Helper.ltp = get_underlying()
     atm = B_SYM.calc_atm_from_ltp(Helper.ltp)
-    b_tknsym: Dict = B_SYM.build_option_chain(atm)
 
-    S_SYM = Symbols(EXCHANGE, SYMBOL, S_EXPIRY)
+    # token maps
+    b_tknsym: Dict = B_SYM.build_option_chain(atm)
     s_tknsym: Dict = S_SYM.build_option_chain(atm)
 except Exception as e:
-    logging.error("bootstrap: ", e)
+    logging.error("bootstrap: e ", e)
     print_exc()
 
 
-def find_symbol(buy_or_short: str, order_args: Dict):
+def find_symbol(buy_or_short: str, order_args: Dict[Any, Any]):
     try:
-        diff = B_DIFF if order_args["side"] == "B" else S_DIFF
-        if buy_or_short == "buy":
-            atm = B_SYM.calc_atm_from_ltp(Helper.ltp)
-            option = B_SYM.find_option_by_distance(atm, diff, "CE", b_tknsym)
-            segment = exch[B_SYM.exchange]["id"]
-            key = S_SYM.exchange + "|" + option["token"]
+        if order_args["side"] == "B":
+            diff = B_DIFF
+            O_SYM = B_SYM
         else:
-            atm = S_SYM.calc_atm_from_ltp(Helper.ltp)
-            option = S_SYM.find_option_by_distance(atm, diff, "PE", s_tknsym)
-            segment = exch[S_SYM.exchange]["id"]
-            key = S_SYM.exchange + "|" + option["token"]
-        order_args["symbol"] = str(segment) + ":" + s_tknsym[key]
+            diff = S_DIFF
+            O_SYM = S_SYM
+        ce_or_pe = "CE" if buy_or_short == "buy" else "PE"
+        atm = O_SYM.calc_atm_from_ltp(Helper.ltp)
+        # { "symbol": "BANKNIFTY24JUL52900PE", "token": "26001" }
+        option: Dict = O_SYM.find_option_by_distance(atm, diff, ce_or_pe)
+        if order_args["side"] == "B":
+            order_args["symbol"] = b_tknsym[option]
+        else:
+            order_args["symbol"] = s_tknsym[option]
+        if not CMMN["live"]:
+            order_args["tradingsymbol"] = option
         logging.info(f"{order_args=}")
         return order_args
     except Exception as e:
@@ -119,6 +121,8 @@ def split_colors(st: pd.DataFrame):
                 if st.iloc[-1]["volume"] > MAGIC:
                     G_MODE_TRADE = True
             else:
+                print(f" helper buy {Helper.buy}")
+                print(f" helper sell {Helper.short}")
                 if (
                     dets.iloc[-1]["close"] > dets.iloc[-1]["st"]
                     and not any(Helper.buy)
@@ -146,10 +150,20 @@ def split_colors(st: pd.DataFrame):
                     and dets.iloc[-1]["close"] < dets.iloc[-1]["open"]
                 ):
                     Helper.exit("buy")
-                    # list of args for entry
                     lst = []
-                    args = dict(symbol=SYMBOL)
-                    lst.append(args)
+                    # list of args for entry
+                    bargs = dict(
+                        side="B",
+                        quantity=BASE["quantity"],
+                    )
+                    bargs = find_symbol("short", bargs)
+                    lst.append(bargs)
+                    sargs = dict(
+                        side="S",
+                        quantity=BASE["quantity"],
+                    )
+                    sargs = find_symbol("short", sargs)
+                    lst.append(sargs)
                     Helper.enter("short", lst)
 
                 print("Signals \n", dets)
@@ -184,8 +198,10 @@ def main():
             if not ival:
                 ival = len(df_ticks)
 
-            Helper.ltp = get_underlying()
-            if Helper.ltp == 0:
+            ltp = get_underlying()
+            if ltp is not None and ltp != Helper.ltp:
+                Helper.ltp = ltp
+            else:
                 return pd.DataFrame()
 
             df_ticks.loc[len(df_ticks)] = {
@@ -204,22 +220,16 @@ def main():
                 df_normal.loc[key, "st"] = st
                 df_normal.loc[key, "st_dir"] = st_dir
 
+            timer(1)
             # get direction and split colors of supertrend
             df_normal = split_colors(df_normal)
-            """
-            # df_normal.to_csv(DATA + "df_normal.csv")
-            # update positions if they are available
-            if any(new_pos):
-                logging.debug(f"found {new_pos=}")
-                D_POS.update(new_pos)
-            """
-            timer(1)
-            pprint(Helper.paper)
-            O_FUTL.write_file(S_DATA + "papper.json", Helper.paper)
+            if is_time_past(CMMN["eod"]):
+                Helper.exit("buy")
+                Helper.exit("short")
+                __import__("sys").exit(0)
             return df_normal
         except KeyboardInterrupt:
             __import__("sys").exit(0)
-
         except Exception as e:
             logging.error(f"{e} while common func")
             print_exc()
@@ -233,3 +243,8 @@ def main():
 
 
 main()
+"""
+if __name__ == "__main__":
+    args = {"side": "B"}
+    resp = find_symbol("buy", args)
+"""

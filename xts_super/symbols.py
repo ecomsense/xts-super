@@ -45,7 +45,7 @@ class Symbols:
     def __init__(self, exchange: str, symbol: str, expiry: str):
         self.exchange = exchange
         self.symbol = symbol
-        self.expiry = expiry
+        self.expiry = str(expiry)
         self.dumpfile = f"{S_DATA}{self.exchange}_symbols.csv"
 
     def dump(self, data: Union[str, str]) -> None:
@@ -103,23 +103,12 @@ class Symbols:
             lst_dct_inst.append(dct_inst)
         return lst_dct_inst
 
-    def find_option_by_distance(
-        self, atm: int, distance: int, c_or_p: str, dct_symbols: Dict
-    ):
-        match = {}
-        if c_or_p == "CE":
-            find_strike = atm + (distance * dct_sym[self.symbol]["diff"])
-        else:
-            find_strike = atm - (distance * dct_sym[self.symbol]["diff"])
+    def find_option_by_distance(self, atm: int, distance: int, c_or_p: str):
+        area = distance * dct_sym[self.symbol]["diff"]
+        find_strike = atm + area if c_or_p == "CE" else atm - area
+        # option symbol
         option_pattern = self.symbol + self.expiry + str(find_strike) + c_or_p
-        for k, v in dct_symbols.items():
-            if v == option_pattern:
-                match.update({"symbol": v, "token": k.split("|")[-1]})
-                break
-        if any(match):
-            return match
-        else:
-            raise Exception("Option not found")
+        return option_pattern
 
     def build_option_chain(self, strike) -> Dict:
         # TODO
@@ -157,7 +146,9 @@ class Symbols:
         tokens_found = (
             df[df["Description"].isin(lst)]
             .assign(
-                tknexc=self.exchange + "|" + df["ExchangeInstrumentID"].astype(str)
+                tknexc=df["ExchangeSegment"]
+                + "|"
+                + df["ExchangeInstrumentID"].astype(str)
             )[["tknexc", "Description"]]
             .set_index("Description")
         )
@@ -175,6 +166,15 @@ class Symbols:
     """
     not used
     """
+
+    def not_implemented(self, dct_symbols: Dict, option_pattern: str) -> Dict:
+        match = {}
+        # symbol is key and exchange|token is value
+        for k, v in dct_symbols.items():
+            if k == option_pattern:
+                match.update({"symbol": k, "token": v.split("|")[-1]})
+                break
+        return match
 
     def parse_option_type(self, tradingsymbol):
         option_pattern = re.compile(rf"{self.symbol}{self.expiry}([CP])\d+")
